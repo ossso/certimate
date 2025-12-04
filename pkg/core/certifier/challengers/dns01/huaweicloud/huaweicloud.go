@@ -2,9 +2,11 @@ package huaweicloud
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/certimate-go/certimate/pkg/core/certifier"
+	"github.com/go-acme/lego/v4/challenge"
 	hwc "github.com/go-acme/lego/v4/providers/dns/huaweicloud"
 )
 
@@ -14,6 +16,32 @@ type ChallengerConfig struct {
 	Region                string `json:"region"`
 	DnsPropagationTimeout int    `json:"dnsPropagationTimeout,omitempty"`
 	DnsTTL                int    `json:"dnsTTL,omitempty"`
+}
+
+// wrapperProvider 包装lego的huaweicloud provider，修复域名末尾点号的匹配问题
+type wrapperProvider struct {
+	provider challenge.Provider
+}
+
+func (w *wrapperProvider) Present(domain, token, keyAuth string) error {
+	// 标准化域名，移除末尾的点号，避免匹配问题
+	normalizedDomain := strings.TrimSuffix(domain, ".")
+	return w.provider.Present(normalizedDomain, token, keyAuth)
+}
+
+func (w *wrapperProvider) CleanUp(domain, token, keyAuth string) error {
+	// 标准化域名，移除末尾的点号，避免匹配问题
+	normalizedDomain := strings.TrimSuffix(domain, ".")
+	return w.provider.CleanUp(normalizedDomain, token, keyAuth)
+}
+
+func (w *wrapperProvider) Timeout() (timeout, interval time.Duration) {
+	// 如果provider实现了ProviderTimeout接口，调用它的Timeout方法
+	if timeoutProvider, ok := w.provider.(challenge.ProviderTimeout); ok {
+		return timeoutProvider.Timeout()
+	}
+	// 否则返回默认值
+	return 0, 0
 }
 
 func NewChallenger(config *ChallengerConfig) (certifier.ACMEChallenger, error) {
@@ -43,5 +71,6 @@ func NewChallenger(config *ChallengerConfig) (certifier.ACMEChallenger, error) {
 		return nil, err
 	}
 
-	return provider, nil
+	// 返回包装后的provider，修复域名末尾点号的匹配问题
+	return &wrapperProvider{provider: provider}, nil
 }
